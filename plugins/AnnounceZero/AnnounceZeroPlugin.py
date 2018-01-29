@@ -20,25 +20,43 @@ def importErrors():
 # Process result got back from tracker
 def processPeerRes(site, peers):
     added = 0
-    # Ip4
+    have_ip4 = "ip4" in peers
+    have_onion = "onion" in peers
+    have_i2p = "i2p" in peers
+    
+    #Ip4
     found_ip4 = 0
-    for packed_address in peers["ip4"]:
-        found_ip4 += 1
-        peer_ip, peer_port = helper.unpackAddress(packed_address)
-        if site.addPeer(peer_ip, peer_port):
-            added += 1
+    if have_ip4:
+       for packed_address in peers["ip4"]:
+          found_ip4 += 1
+          peer_ip, peer_port = helper.unpackAddress(packed_address)
+          if site.addPeer(peer_ip, peer_port):
+             added += 1
+
     # Onion
     found_onion = 0
-    for packed_address in peers["onion"]:
-        found_onion += 1
-        peer_onion, peer_port = helper.unpackOnionAddress(packed_address)
-        if site.addPeer(peer_onion, peer_port):
-            added += 1
+    if have_onion: 
+       for packed_address in peers["onion"]:
+          found_onion += 1
+          peer_onion, peer_port = helper.unpackOnionAddress(packed_address)
+          if site.addPeer(peer_onion, peer_port):
+             added += 1
+
+    # I2P
+    found_i2p = 0
+    if have_i2p:
+       for packed_address in peers["i2p"]:
+          found_i2p += 1
+          peer_i2p, peer_port = helper.unpackI2PAddress(packed_address)
+          if site.addPeer(peer_i2p, peer_port):
+             added += 1
+
+
 
     if added:
         site.worker_manager.onPeers()
         site.updateWebsocket(peers_added=added)
-        site.log.debug("Found %s ip4, %s onion peers, new: %s" % (found_ip4, found_onion, added))
+        site.log.debug("Found %s ip4, %s onion peers, %s i2p peers, new: %s" % (found_ip4, found_onion, found_i2p, added))
 
 
 @PluginManager.registerTo("Site")
@@ -55,6 +73,10 @@ class SitePlugin(object):
         if self.connection_server and self.connection_server.tor_manager and self.connection_server.tor_manager.enabled:
             need_types.append("onion")
 
+        if self.connection_server and self.connection_server.i2p_manager and self.connection_server.i2p_manager.enabled:
+            need_types.append("i2p")
+
+
         if mode == "start" or mode == "more":  # Single: Announce only this site
             sites = [self]
             full_announce = False
@@ -68,12 +90,15 @@ class SitePlugin(object):
 
         # Create request
         request = {
-            "hashes": [], "onions": [], "port": fileserver_port, "need_types": need_types, "need_num": 20, "add": add_types
+            "hashes": [], "onions": [], "i2ps": [], "port": fileserver_port, "need_types": need_types, "need_num": 20, "add": add_types
         }
         for site in sites:
             if "onion" in add_types:
                 onion = self.connection_server.tor_manager.getOnion(site.address)
                 request["onions"].append(onion)
+            if "i2p" in add_types:
+                onion = self.connection_server.i2p_manager.getOnion(site.address)
+                request["i2ps"].append(onion)
             request["hashes"].append(hashlib.sha256(site.address).digest())
 
         # Tracker can remove sites that we don't announce
@@ -119,6 +144,24 @@ class SitePlugin(object):
                 if full_announce:
                     time_full_announced[tracker_address] = 0
                 return False
+        if "i2p_sign_this" in res:
+            self.log.debug("Signing %s for %s to add %s i2ps" % (res["i2p_sign_this"], tracker_address, len(sites)))
+            request["i2p_signs"] = {}
+            request["i2p_sign_this"] = res["i2p_sign_this"]
+            request["need_num"] = 0
+            for site in sites:
+                onion = self.connection_server.i2p_manager.getOnion(site.address)
+                publickey = self.connection_server.i2p_manager.getPublickey(onion)
+                if publickey not in request["i2p_signs"]:
+                    sign = publickey
+                    request["i2p_signs"][publickey] = sign
+            res = tracker.request("announce", request)
+            if not res or "i2p_sign_this" in res:
+                self.log.debug("Announce i2p address to %s failed: %s" % (tracker_address, res))
+                if full_announce:
+                    time_full_announced[tracker_address] = 0
+                return False
+
 
         if full_announce:
             tracker.remove()  # Close connection, we don't need it in next 5 minute
