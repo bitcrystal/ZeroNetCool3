@@ -183,7 +183,7 @@ class FileServer(ConnectionServer):
 
         if "open" not in message:
             if (not please_not_test):
-                self.log.info("[BAD return {"result": None, "message": debug_message}:(] Port closed: %s" % message)
+                self.log.info("[BAD :(] Port closed: %s" % message)
             if is_my_port:
                 self.port_opened = False  # Self port, update port_opened status
                 match = re.match(".*targetIP.*?value=\"(.*?)\"", data, re.DOTALL)  # Try find my external ip in message
